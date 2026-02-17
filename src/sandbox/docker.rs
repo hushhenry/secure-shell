@@ -55,6 +55,7 @@ impl DockerSandbox {
     }
 
     /// Check if Docker CLI is present.
+    #[allow(dead_code)]
     fn is_cli_present() -> bool {
         Command::new("docker")
             .arg("--version")
