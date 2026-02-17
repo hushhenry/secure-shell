@@ -518,6 +518,9 @@ impl SecurityPolicy {
 
     /// Validate that a resolved path is still inside an allowed path (e.g. after joining + canonicalize). Prevents symlink escapes.
     pub fn is_resolved_path_allowed(&self, resolved: &Path) -> bool {
+        let resolved = resolved
+            .canonicalize()
+            .unwrap_or_else(|_| resolved.to_path_buf());
         for allowed in &self.allowed_paths {
             let root = allowed
                 .path
