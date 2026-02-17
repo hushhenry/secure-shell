@@ -32,7 +32,7 @@ impl DockerSandbox {
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "Docker not found",
+                "Docker not available (CLI missing or daemon not running)",
             ))
         }
     }
@@ -44,7 +44,7 @@ impl DockerSandbox {
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "Docker not found",
+                "Docker not available (CLI missing or daemon not running)",
             ))
         }
     }
@@ -54,11 +54,23 @@ impl DockerSandbox {
         Self::new()
     }
 
-    fn is_installed() -> bool {
+    /// Check if Docker CLI is present.
+    fn is_cli_present() -> bool {
         Command::new("docker")
             .arg("--version")
             .output()
             .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Check if Docker daemon is reachable (CLI present + daemon running).
+    fn is_installed() -> bool {
+        Command::new("docker")
+            .arg("info")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
             .unwrap_or(false)
     }
 
@@ -144,6 +156,14 @@ impl PersistentSandbox for DockerSandbox {
     }
 
     fn exec_in_session(&self, session_id: &str, cmd: &mut Command) -> std::io::Result<()> {
+        // Ensure daemon is reachable before rewriting the command
+        if !Self::is_installed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Docker daemon not available",
+            ));
+        }
+
         let program = cmd.get_program().to_string_lossy().to_string();
         let args: Vec<String> = cmd
             .get_args()
@@ -151,7 +171,13 @@ impl PersistentSandbox for DockerSandbox {
             .collect();
 
         // Start container if stopped
-        let _ = Command::new("docker").arg("start").arg(session_id).output();
+        let start_out = Command::new("docker").arg("start").arg(session_id).output()?;
+        if !start_out.status.success() {
+            let err = String::from_utf8_lossy(&start_out.stderr);
+            return Err(std::io::Error::other(format!(
+                "docker start failed: {err}"
+            )));
+        }
 
         let mut docker_cmd = Command::new("docker");
         docker_cmd.arg("exec");
@@ -245,14 +271,30 @@ mod tests {
     }
 
     #[test]
-    fn docker_persistent_sandbox_methods_exist() {
-        // Verify PersistentSandbox trait is implemented.
-        // We cannot reliably test Docker commands in CI without a running daemon,
-        // so we only verify the API surface compiles and is callable.
+    fn docker_persistent_sandbox_errors_when_daemon_not_running() {
+        // Skip if Docker daemon IS running — this test is for the "no daemon" case.
+        if DockerSandbox::is_installed() {
+            return;
+        }
         let sandbox = DockerSandbox::default();
-        let _ = sandbox.session_exists("nonexistent");
-        // Other methods (create/exec/destroy/list) require a running Docker daemon
-        // and are exercised in environments where Docker is available.
+        // create_session should fail because `docker create` can't reach daemon
+        assert!(sandbox.create_session("test-no-daemon").is_err());
+        // exec_in_session should fail
+        let mut cmd = Command::new("true");
+        assert!(sandbox.exec_in_session("test-no-daemon", &mut cmd).is_err());
+        // destroy_session should fail
+        assert!(sandbox.destroy_session("test-no-daemon").is_err());
+        // list_sessions should fail
+        assert!(sandbox.list_sessions().is_err());
+    }
+
+    #[test]
+    fn docker_session_exists_returns_false_when_no_daemon() {
+        if DockerSandbox::is_installed() {
+            return;
+        }
+        let sandbox = DockerSandbox::default();
+        assert!(!sandbox.session_exists("nonexistent"));
     }
 
     #[test]
