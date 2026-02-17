@@ -1,0 +1,32 @@
+[package]
+name = "secure-shell"
+version = "0.1.0"
+edition = "2021"
+authors = ["hushhenry"]
+license = "Apache-2.0"
+description = "Secure shell execution with pluggable sandbox backends, policy enforcement, and audit logging"
+repository = "https://github.com/hushhenry/secure-shell"
+readme = "README.md"
+
+[features]
+default = []
+sandbox-landlock = []
+sandbox-bubblewrap = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "rt", "macros"] }
+async-trait = "0.1"
+anyhow = "1"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["process", "rt", "macros", "rt-multi-thread"] }
