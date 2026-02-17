@@ -758,7 +758,10 @@ mod tests {
 
     #[test]
     fn is_resolved_path_allowed_under_allowed() {
-        let tmp = std::env::temp_dir();
+        // Use canonicalized temp dir to handle macOS /tmp → /private/tmp symlink
+        let tmp = std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir());
         let policy = SecurityPolicy {
             allowed_paths: vec![AllowedPath {
                 path: tmp.clone(),
