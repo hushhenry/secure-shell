@@ -31,13 +31,6 @@ impl RuntimeAdapter for NativeRuntime {
         true
     }
 
-    fn storage_path(&self) -> PathBuf {
-        // Try to use HOME environment variable, fallback to current directory
-        std::env::var("HOME")
-            .map(|h| PathBuf::from(h).join(".zeroclaw"))
-            .unwrap_or_else(|_| PathBuf::from(".zeroclaw"))
-    }
-
     fn supports_long_running(&self) -> bool {
         true
     }
@@ -80,12 +73,6 @@ mod tests {
     #[test]
     fn native_memory_budget_unlimited() {
         assert_eq!(NativeRuntime::new().memory_budget(), 0);
-    }
-
-    #[test]
-    fn native_storage_path_contains_zeroclaw() {
-        let path = NativeRuntime::new().storage_path();
-        assert!(path.to_string_lossy().contains("zeroclaw"));
     }
 
     #[test]

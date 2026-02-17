@@ -67,14 +67,6 @@ impl RuntimeAdapter for DockerRuntime {
         self.config.mount_workspace
     }
 
-    fn storage_path(&self) -> PathBuf {
-        if self.config.mount_workspace {
-            PathBuf::from("/workspace/.zeroclaw")
-        } else {
-            PathBuf::from("/tmp/.zeroclaw")
-        }
-    }
-
     fn supports_long_running(&self) -> bool {
         false
     }
@@ -153,17 +145,6 @@ mod tests {
     fn docker_runtime_has_shell_access() {
         let runtime = DockerRuntime::new(DockerRuntimeConfig::default());
         assert!(runtime.has_shell_access());
-    }
-
-    #[test]
-    fn docker_runtime_storage_path() {
-        let mut config = DockerRuntimeConfig::default();
-        config.mount_workspace = true;
-        let runtime = DockerRuntime::new(config);
-        assert_eq!(
-            runtime.storage_path(),
-            PathBuf::from("/workspace/.zeroclaw")
-        );
     }
 
     #[test]

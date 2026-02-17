@@ -8,8 +8,6 @@ use crate::sandbox::Sandbox;
 #[cfg(feature = "sandbox-bubblewrap")]
 use super::BubblewrapSandbox;
 use super::DockerSandbox;
-#[cfg(target_os = "linux")]
-use super::FirejailSandbox;
 #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
 use super::LandlockSandbox;
 use super::NoopSandbox;
@@ -34,22 +32,6 @@ pub(super) fn create_sandbox_impl(config: &SecurityConfig, persistent: bool) -> 
             }
             tracing::warn!(
                 "Landlock requested but not available, falling back to application-layer"
-            );
-            Arc::new(NoopSandbox)
-        }
-        SandboxBackend::Firejail => {
-            #[cfg(target_os = "linux")]
-            {
-                if let Ok(sandbox) = FirejailSandbox::new() {
-                    return Arc::new(sandbox);
-                }
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                let _ = config;
-            }
-            tracing::warn!(
-                "Firejail requested but not available, falling back to application-layer"
             );
             Arc::new(NoopSandbox)
         }
@@ -103,11 +85,6 @@ fn detect_best_sandbox(persistent: bool) -> Arc<dyn Sandbox> {
                 tracing::info!("Landlock sandbox enabled (Linux kernel 5.13+)");
                 return Arc::new(sandbox);
             }
-        }
-
-        if let Ok(sandbox) = FirejailSandbox::probe() {
-            tracing::info!("Firejail sandbox enabled");
-            return Arc::new(sandbox);
         }
     }
 

@@ -140,7 +140,6 @@ pub enum SandboxBackend {
     #[default]
     Auto,
     Landlock,
-    Firejail,
     Bubblewrap,
     Docker,
     #[cfg(target_os = "macos")]

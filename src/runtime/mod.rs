@@ -21,9 +21,6 @@ pub trait RuntimeAdapter: Send + Sync {
     /// Whether this runtime supports filesystem access.
     fn has_filesystem_access(&self) -> bool;
 
-    /// Base storage path for this runtime.
-    fn storage_path(&self) -> PathBuf;
-
     /// Whether long-running processes are supported.
     fn supports_long_running(&self) -> bool;
 

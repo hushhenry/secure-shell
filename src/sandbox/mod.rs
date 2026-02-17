@@ -1,11 +1,7 @@
 //! Pluggable sandbox backends for OS-level isolation.
 
-#[cfg(feature = "sandbox-bubblewrap")]
-mod bubblewrap;
 mod detect;
 mod docker;
-#[cfg(target_os = "linux")]
-mod firejail;
 #[cfg(feature = "sandbox-landlock")]
 mod landlock;
 #[cfg(target_os = "macos")]
@@ -14,8 +10,6 @@ mod seatbelt;
 #[cfg(feature = "sandbox-bubblewrap")]
 pub use bubblewrap::BubblewrapSandbox;
 pub use docker::DockerSandbox;
-#[cfg(target_os = "linux")]
-pub use firejail::FirejailSandbox;
 #[cfg(feature = "sandbox-landlock")]
 pub use landlock::LandlockSandbox;
 #[cfg(target_os = "macos")]
@@ -113,7 +107,7 @@ mod tests {
         let config = SecurityConfig {
             sandbox: SandboxConfig {
                 enabled: Some(false),
-                backend: SandboxBackend::Firejail,
+                backend: SandboxBackend::Docker,
                 firejail_args: vec![],
             },
             ..Default::default()
