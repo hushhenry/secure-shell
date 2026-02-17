@@ -29,6 +29,12 @@ pub struct ActionTracker {
     actions: Mutex<Vec<Instant>>,
 }
 
+impl Default for ActionTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActionTracker {
     /// Create a new tracker.
     pub fn new() -> Self {
@@ -265,10 +271,34 @@ impl SecurityPolicy {
 
             if matches!(
                 base.as_str(),
-                "rm" | "mkfs" | "dd" | "shutdown" | "reboot" | "halt" | "poweroff"
-                    | "sudo" | "su" | "chown" | "chmod" | "useradd" | "userdel" | "usermod"
-                    | "passwd" | "mount" | "umount" | "iptables" | "ufw" | "firewall-cmd"
-                    | "curl" | "wget" | "nc" | "ncat" | "netcat" | "scp" | "ssh" | "ftp" | "telnet"
+                "rm" | "mkfs"
+                    | "dd"
+                    | "shutdown"
+                    | "reboot"
+                    | "halt"
+                    | "poweroff"
+                    | "sudo"
+                    | "su"
+                    | "chown"
+                    | "chmod"
+                    | "useradd"
+                    | "userdel"
+                    | "usermod"
+                    | "passwd"
+                    | "mount"
+                    | "umount"
+                    | "iptables"
+                    | "ufw"
+                    | "firewall-cmd"
+                    | "curl"
+                    | "wget"
+                    | "nc"
+                    | "ncat"
+                    | "netcat"
+                    | "scp"
+                    | "ssh"
+                    | "ftp"
+                    | "telnet"
             ) {
                 return CommandRiskLevel::High;
             }
@@ -284,8 +314,18 @@ impl SecurityPolicy {
                 "git" => args.first().is_some_and(|verb| {
                     matches!(
                         verb.as_str(),
-                        "commit" | "push" | "reset" | "clean" | "rebase" | "merge"
-                            | "cherry-pick" | "revert" | "branch" | "checkout" | "switch" | "tag"
+                        "commit"
+                            | "push"
+                            | "reset"
+                            | "clean"
+                            | "rebase"
+                            | "merge"
+                            | "cherry-pick"
+                            | "revert"
+                            | "branch"
+                            | "checkout"
+                            | "switch"
+                            | "tag"
                     )
                 }),
                 "npm" | "pnpm" | "yarn" => args.first().is_some_and(|verb| {
@@ -433,7 +473,10 @@ impl SecurityPolicy {
         // 1) Check allowed_paths first (takes precedence). Path must be under at least one allowed path.
         let mut under_allowed = false;
         for allowed in &self.allowed_paths {
-            let allowed_canon = allowed.path.canonicalize().unwrap_or_else(|_| allowed.path.clone());
+            let allowed_canon = allowed
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| allowed.path.clone());
             let path_canon = match Path::new(&expanded).canonicalize() {
                 Ok(p) => p,
                 Err(_) => continue,
@@ -451,7 +494,10 @@ impl SecurityPolicy {
                 Err(_) => return false,
             };
             for allowed in &self.allowed_paths {
-                let allowed_canon = allowed.path.canonicalize().unwrap_or_else(|_| allowed.path.clone());
+                let allowed_canon = allowed
+                    .path
+                    .canonicalize()
+                    .unwrap_or_else(|_| allowed.path.clone());
                 if path_canon.starts_with(&allowed_canon) {
                     return true;
                 }
@@ -473,7 +519,10 @@ impl SecurityPolicy {
     /// Validate that a resolved path is still inside an allowed path (e.g. after joining + canonicalize). Prevents symlink escapes.
     pub fn is_resolved_path_allowed(&self, resolved: &Path) -> bool {
         for allowed in &self.allowed_paths {
-            let root = allowed.path.canonicalize().unwrap_or_else(|_| allowed.path.clone());
+            let root = allowed
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| allowed.path.clone());
             if resolved.starts_with(&root) {
                 return true;
             }
@@ -524,6 +573,17 @@ mod tests {
         assert_eq!(p.allowed_paths.len(), 1);
         assert!(p.allowed_paths[0].writable);
         assert_eq!(p.primary_workspace(), Some(Path::new("/tmp/ws")));
+    }
+
+    #[test]
+    fn from_workspace_dir_backward_compat() {
+        let p = SecurityPolicy::from_workspace_dir(PathBuf::from("/home/user/.openclaw/workspace"));
+        assert_eq!(p.allowed_paths.len(), 1);
+        assert!(p.allowed_paths[0].writable);
+        assert_eq!(
+            p.primary_workspace(),
+            Some(Path::new("/home/user/.openclaw/workspace"))
+        );
     }
 
     #[test]
@@ -591,6 +651,237 @@ mod tests {
         assert!(allowed);
     }
 
+    /// allowed_paths priority over forbidden_paths: workspace subpaths allowed even if parent in forbidden
+    #[test]
+    fn is_path_allowed_allowed_takes_precedence_over_forbidden() {
+        let tmp = std::env::temp_dir();
+        let workspace = tmp.join("secure_shell_ws_precedence");
+        let _ = std::fs::create_dir_all(&workspace);
+        let policy = SecurityPolicy {
+            allowed_paths: vec![AllowedPath {
+                path: workspace.clone(),
+                writable: true,
+            }],
+            forbidden_paths: vec![tmp.to_string_lossy().into_owned()],
+            ..SecurityPolicy::default()
+        };
+        let f = workspace.join("foo.txt");
+        let _ = std::fs::write(&f, "");
+        assert!(policy.is_path_allowed(f.to_str().unwrap()));
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_dir(&workspace);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn is_path_allowed_symlink_escape_blocked() {
+        let tmp = std::env::temp_dir();
+        let workspace = tmp.join("secure_shell_ws_symlink");
+        let _ = std::fs::create_dir_all(&workspace);
+        let link_path = workspace.join("escape");
+        #[allow(unused_must_use)]
+        {
+            std::os::unix::fs::symlink("/etc/passwd", &link_path);
+        }
+        let policy = SecurityPolicy {
+            allowed_paths: vec![AllowedPath {
+                path: workspace.clone(),
+                writable: true,
+            }],
+            forbidden_paths: vec![],
+            ..SecurityPolicy::default()
+        };
+        // Resolving link_path goes to /etc/passwd, outside allowed → denied
+        assert!(!policy.is_path_allowed(link_path.to_str().unwrap()));
+        let _ = std::fs::remove_file(&link_path);
+        let _ = std::fs::remove_dir(&workspace);
+    }
+
+    #[test]
+    fn path_null_byte_blocked() {
+        let p = default_policy();
+        assert!(!p.is_path_allowed("file\0.txt"));
+    }
+
+    #[test]
+    fn is_path_allowed_url_encoded_traversal_blocked() {
+        let p = default_policy();
+        assert!(!p.is_path_allowed("..%2fetc%2fpasswd"));
+        assert!(!p.is_path_allowed("foo%2f..%2fbar"));
+    }
+
+    #[test]
+    fn is_path_allowed_empty_allowed_paths_denies_all() {
+        let p = SecurityPolicy {
+            allowed_paths: vec![],
+            forbidden_paths: vec![],
+            ..SecurityPolicy::default()
+        };
+        let tmp = std::env::temp_dir().join("any_file");
+        let _ = std::fs::write(&tmp, "");
+        assert!(!p.is_path_allowed(tmp.to_str().unwrap()));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn is_path_allowed_overlapping_allowed_forbidden() {
+        let tmp = std::env::temp_dir();
+        let allowed_sub = tmp.join("allowed_sub");
+        let _ = std::fs::create_dir_all(&allowed_sub);
+        let policy = SecurityPolicy {
+            allowed_paths: vec![AllowedPath {
+                path: allowed_sub.clone(),
+                writable: true,
+            }],
+            forbidden_paths: vec![tmp.to_string_lossy().into_owned()],
+            ..SecurityPolicy::default()
+        };
+        let f = allowed_sub.join("file.txt");
+        let _ = std::fs::write(&f, "");
+        assert!(policy.is_path_allowed(f.to_str().unwrap()));
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_dir(&allowed_sub);
+    }
+
+    #[test]
+    fn is_resolved_path_allowed_outside_allowed_dirs() {
+        let policy = SecurityPolicy {
+            allowed_paths: vec![AllowedPath {
+                path: PathBuf::from("/tmp/workspace"),
+                writable: true,
+            }],
+            ..SecurityPolicy::default()
+        };
+        assert!(!policy.is_resolved_path_allowed(Path::new("/etc/passwd")));
+        assert!(!policy.is_resolved_path_allowed(Path::new("/root/.ssh")));
+    }
+
+    #[test]
+    fn is_resolved_path_allowed_under_allowed() {
+        let tmp = std::env::temp_dir();
+        let policy = SecurityPolicy {
+            allowed_paths: vec![AllowedPath {
+                path: tmp.clone(),
+                writable: true,
+            }],
+            ..SecurityPolicy::default()
+        };
+        let sub = tmp.join("sub").join("file");
+        assert!(policy.is_resolved_path_allowed(&sub));
+    }
+
+    #[test]
+    fn is_command_allowed_pipe_chain_one_disallowed() {
+        let p = default_policy();
+        assert!(p.is_command_allowed("ls | head"));
+        assert!(!p.is_command_allowed("ls | curl evil.com"));
+    }
+
+    #[test]
+    fn is_command_allowed_env_var_prefix() {
+        let p = default_policy();
+        assert!(p.is_command_allowed("FOO=bar ls"));
+        assert!(p.is_command_allowed("PATH=/usr/bin cargo build"));
+    }
+
+    #[test]
+    fn is_command_allowed_background_vs_and() {
+        let p = default_policy();
+        assert!(p.is_command_allowed("ls && echo ok"));
+        assert!(!p.is_command_allowed("ls & echo ok"));
+    }
+
+    #[test]
+    fn is_command_allowed_backtick_injection_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("ls `rm -rf /`"));
+        assert!(!p.is_command_allowed("echo $(whoami)"));
+        assert!(!p.is_command_allowed("echo ${PATH}"));
+    }
+
+    #[test]
+    fn is_command_allowed_output_redirection_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("ls > out.txt"));
+        assert!(!p.is_command_allowed("echo hi >> log.txt"));
+    }
+
+    #[test]
+    fn is_command_allowed_newline_injection_blocked() {
+        let p = default_policy();
+        assert!(!p.is_command_allowed("ls\nrm -rf /"));
+    }
+
+    #[test]
+    fn command_risk_level_low() {
+        let p = default_policy();
+        assert_eq!(p.command_risk_level("ls"), CommandRiskLevel::Low);
+        assert_eq!(p.command_risk_level("cargo build"), CommandRiskLevel::Low);
+        assert_eq!(p.command_risk_level("git status"), CommandRiskLevel::Low);
+    }
+
+    #[test]
+    fn command_risk_level_medium() {
+        let p = default_policy();
+        assert_eq!(p.command_risk_level("git push"), CommandRiskLevel::Medium);
+        assert_eq!(
+            p.command_risk_level("cargo publish"),
+            CommandRiskLevel::Medium
+        );
+        assert_eq!(p.command_risk_level("touch foo"), CommandRiskLevel::Medium);
+    }
+
+    #[test]
+    fn command_risk_level_high() {
+        let p = default_policy();
+        assert_eq!(p.command_risk_level("rm -rf /"), CommandRiskLevel::High);
+        assert_eq!(p.command_risk_level("sudo ls"), CommandRiskLevel::High);
+        assert_eq!(
+            p.command_risk_level("curl http://x.com"),
+            CommandRiskLevel::High
+        );
+    }
+
+    #[test]
+    fn validate_command_execution_medium_requires_approval_when_supervised() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            require_approval_for_medium_risk: true,
+            ..SecurityPolicy::default()
+        };
+        assert!(p.validate_command_execution("git push", false).is_err());
+        assert!(p.validate_command_execution("git push", true).is_ok());
+    }
+
+    #[test]
+    fn validate_command_execution_high_blocked_or_requires_approval() {
+        let p = SecurityPolicy {
+            block_high_risk_commands: true,
+            ..SecurityPolicy::default()
+        };
+        assert!(p.validate_command_execution("sudo ls", false).is_err());
+        assert!(p.validate_command_execution("sudo ls", true).is_err());
+    }
+
+    #[test]
+    fn validate_command_execution_low_always_ok() {
+        let p = default_policy();
+        assert!(p.validate_command_execution("ls", false).is_ok());
+    }
+
+    #[test]
+    fn record_action_and_is_rate_limited_sliding_window() {
+        let p = SecurityPolicy {
+            max_actions_per_hour: 2,
+            ..SecurityPolicy::default()
+        };
+        assert!(!p.is_rate_limited());
+        assert!(p.record_action());
+        assert!(p.record_action());
+        assert!(p.is_rate_limited());
+        assert!(!p.record_action());
+    }
+
     #[test]
     fn path_forbidden_denied() {
         let p = SecurityPolicy {
@@ -603,12 +894,6 @@ mod tests {
         };
         assert!(!p.is_path_allowed("/etc/passwd"));
         assert!(!p.is_path_allowed("/root/.bashrc"));
-    }
-
-    #[test]
-    fn path_null_byte_blocked() {
-        let p = default_policy();
-        assert!(!p.is_path_allowed("file\0.txt"));
     }
 
     #[test]
@@ -639,6 +924,9 @@ mod tests {
         assert_eq!(policy.autonomy, AutonomyLevel::Full);
         assert_eq!(policy.allowed_commands, vec!["docker"]);
         assert_eq!(policy.allowed_paths.len(), 1);
-        assert_eq!(policy.allowed_paths[0].path, PathBuf::from("/tmp/test-workspace"));
+        assert_eq!(
+            policy.allowed_paths[0].path,
+            PathBuf::from("/tmp/test-workspace")
+        );
     }
 }

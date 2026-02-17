@@ -41,3 +41,15 @@ pub trait PersistentSandbox: Sandbox {
             .unwrap_or(false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_returns_correct_error_kind() {
+        let err = unsupported();
+        assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
+        assert!(err.to_string().contains("not supported"));
+    }
+}

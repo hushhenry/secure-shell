@@ -2,8 +2,6 @@
 //!
 //! Requires the `bwrap` binary. Available behind the `sandbox-bubblewrap` feature.
 
-#![cfg(feature = "sandbox-bubblewrap")]
-
 use std::process::Command;
 
 use crate::sandbox::Sandbox;
@@ -49,10 +47,16 @@ impl Sandbox for BubblewrapSandbox {
 
         let mut bwrap_cmd = Command::new("bwrap");
         bwrap_cmd.args([
-            "--ro-bind", "/usr", "/usr",
-            "--dev", "/dev",
-            "--proc", "/proc",
-            "--bind", "/tmp", "/tmp",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--bind",
+            "/tmp",
+            "/tmp",
             "--unshare-all",
             "--die-with-parent",
         ]);
@@ -79,9 +83,25 @@ impl Sandbox for BubblewrapSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn bubblewrap_sandbox_name() {
         assert_eq!(BubblewrapSandbox.name(), "bubblewrap");
+    }
+
+    #[test]
+    fn bubblewrap_wrap_command_prepends_bwrap_with_flags() {
+        if let Ok(sandbox) = BubblewrapSandbox::new() {
+            let mut cmd = Command::new("ls");
+            sandbox.wrap_command(&mut cmd).unwrap();
+            assert_eq!(cmd.get_program().to_string_lossy(), "bwrap");
+            let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().into()).collect();
+            assert!(args.contains(&"--ro-bind".to_string()));
+            assert!(args.contains(&"/usr".to_string()));
+            assert!(args.contains(&"--unshare-all".to_string()));
+            assert!(args.contains(&"--die-with-parent".to_string()));
+            assert!(args.contains(&"ls".to_string()));
+        }
     }
 }

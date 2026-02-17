@@ -7,7 +7,8 @@ use std::process::Command;
 use crate::persistence::PersistentSandbox;
 use crate::sandbox::Sandbox;
 
-const SECURE_SHELL_LABEL: &str = "secure-shell=true";
+/// Label applied to all Docker containers created by this sandbox (for filtering).
+pub const SECURE_SHELL_LABEL: &str = "secure-shell=true";
 
 /// Docker sandbox backend.
 #[derive(Debug, Clone)]
@@ -64,10 +65,14 @@ impl DockerSandbox {
     /// Base docker args for run/create: memory, cpus, network, label.
     fn base_docker_args() -> Vec<&'static str> {
         vec![
-            "--memory", "512m",
-            "--cpus", "1.0",
-            "--network", "none",
-            "--label", SECURE_SHELL_LABEL,
+            "--memory",
+            "512m",
+            "--cpus",
+            "1.0",
+            "--network",
+            "none",
+            "--label",
+            SECURE_SHELL_LABEL,
         ]
     }
 }
@@ -131,16 +136,19 @@ impl PersistentSandbox for DockerSandbox {
             Ok(())
         } else {
             let err = String::from_utf8_lossy(&out.stderr);
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("docker create failed: {}", err),
-            ))
+            Err(std::io::Error::other(format!(
+                "docker create failed: {}",
+                err
+            )))
         }
     }
 
     fn exec_in_session(&self, session_id: &str, cmd: &mut Command) -> std::io::Result<()> {
         let program = cmd.get_program().to_string_lossy().to_string();
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
 
         // Start container if stopped
         let _ = Command::new("docker").arg("start").arg(session_id).output();
@@ -162,10 +170,7 @@ impl PersistentSandbox for DockerSandbox {
             Ok(())
         } else {
             let err = String::from_utf8_lossy(&out.stderr);
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("docker rm failed: {}", err),
-            ))
+            Err(std::io::Error::other(format!("docker rm failed: {}", err)))
         }
     }
 
@@ -181,10 +186,7 @@ impl PersistentSandbox for DockerSandbox {
             ])
             .output()?;
         if !out.status.success() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "docker ps failed",
-            ));
+            return Err(std::io::Error::other("docker ps failed"));
         }
         let list = String::from_utf8_lossy(&out.stdout);
         let ids: Vec<String> = list
@@ -199,6 +201,7 @@ impl PersistentSandbox for DockerSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn docker_sandbox_name() {
@@ -219,5 +222,47 @@ mod tests {
             Ok(sandbox) => assert_eq!(sandbox.image, "ubuntu:latest"),
             Err(_) => assert!(!DockerSandbox::is_installed()),
         }
+    }
+
+    #[test]
+    fn docker_wrap_command_rewrites_to_docker_run() {
+        let sandbox = DockerSandbox::default();
+        let mut cmd = Command::new("echo");
+        cmd.arg("hello");
+        sandbox.wrap_command(&mut cmd).unwrap();
+        let program = cmd.get_program().to_string_lossy();
+        assert_eq!(program, "docker");
+        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().into()).collect();
+        assert_eq!(args[0], "run");
+        assert_eq!(args[1], "--rm");
+        assert!(args.contains(&"--memory".to_string()));
+        assert!(args.contains(&"--cpus".to_string()));
+        assert!(args.contains(&"--network".to_string()));
+        assert!(args.contains(&"none".to_string()));
+        assert!(args.contains(&SECURE_SHELL_LABEL.to_string()));
+        assert!(args.contains(&"echo".to_string()));
+        assert!(args.contains(&"hello".to_string()));
+    }
+
+    #[test]
+    fn docker_persistent_sandbox_errors_when_not_installed() {
+        if DockerSandbox::is_installed() {
+            return;
+        }
+        let sandbox = DockerSandbox::default();
+        let err = sandbox.create_session("test-session");
+        assert!(err.is_err());
+        let mut cmd = Command::new("true");
+        let err = sandbox.exec_in_session("test-session", &mut cmd);
+        assert!(err.is_err());
+        let err = sandbox.destroy_session("test-session");
+        assert!(err.is_err());
+        let err = sandbox.list_sessions();
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn secure_shell_label_constant() {
+        assert_eq!(SECURE_SHELL_LABEL, "secure-shell=true");
     }
 }

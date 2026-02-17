@@ -15,7 +15,8 @@ impl DockerRuntime {
         Self { config }
     }
 
-    fn workspace_mount_path(&self, workspace_dir: &Path) -> Result<PathBuf> {
+    /// Validate and resolve workspace path for mounting (exposed for tests).
+    pub fn workspace_mount_path(&self, workspace_dir: &Path) -> Result<PathBuf> {
         let resolved = workspace_dir
             .canonicalize()
             .unwrap_or_else(|_| workspace_dir.to_path_buf());
@@ -159,7 +160,10 @@ mod tests {
         let mut config = DockerRuntimeConfig::default();
         config.mount_workspace = true;
         let runtime = DockerRuntime::new(config);
-        assert_eq!(runtime.storage_path(), PathBuf::from("/workspace/.zeroclaw"));
+        assert_eq!(
+            runtime.storage_path(),
+            PathBuf::from("/workspace/.zeroclaw")
+        );
     }
 
     #[test]
@@ -168,5 +172,37 @@ mod tests {
         cfg.memory_limit_mb = Some(256);
         let runtime = DockerRuntime::new(cfg);
         assert_eq!(runtime.memory_budget(), 256 * 1024 * 1024);
+    }
+
+    #[test]
+    fn docker_runtime_build_shell_command_includes_docker_args() {
+        let runtime = DockerRuntime::new(DockerRuntimeConfig::default());
+        let cwd = std::env::temp_dir();
+        let cmd = runtime.build_shell_command("echo hello", &cwd).unwrap();
+        let debug = format!("{cmd:?}");
+        assert!(debug.contains("docker"));
+        assert!(debug.contains("run"));
+        assert!(debug.contains("echo hello"));
+    }
+
+    #[test]
+    fn docker_workspace_mount_path_rejects_root() {
+        let runtime = DockerRuntime::new(DockerRuntimeConfig::default());
+        let err = runtime.workspace_mount_path(Path::new("/"));
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("Refusing to mount"));
+    }
+
+    #[test]
+    fn docker_workspace_mount_path_validates_allowed_roots() {
+        let mut config = DockerRuntimeConfig::default();
+        config.allowed_workspace_roots = vec!["/allowed".to_string()];
+        let runtime = DockerRuntime::new(config);
+        let err = runtime.workspace_mount_path(Path::new("/other/workspace"));
+        assert!(err.is_err());
+        assert!(err
+            .unwrap_err()
+            .to_string()
+            .contains("allowed_workspace_roots"));
     }
 }

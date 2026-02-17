@@ -5,14 +5,14 @@ use std::sync::Arc;
 use crate::config::{SandboxBackend, SecurityConfig};
 use crate::sandbox::Sandbox;
 
-use super::NoopSandbox;
-#[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
-use super::LandlockSandbox;
-#[cfg(target_os = "linux")]
-use super::FirejailSandbox;
 #[cfg(feature = "sandbox-bubblewrap")]
 use super::BubblewrapSandbox;
 use super::DockerSandbox;
+#[cfg(target_os = "linux")]
+use super::FirejailSandbox;
+#[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
+use super::LandlockSandbox;
+use super::NoopSandbox;
 #[cfg(target_os = "macos")]
 use super::SeatbeltSandbox;
 
@@ -172,5 +172,34 @@ mod tests {
         };
         let sandbox = create_sandbox_impl(&config, false);
         assert!(sandbox.is_available());
+    }
+
+    #[test]
+    fn create_sandbox_impl_backend_none() {
+        let config = SecurityConfig {
+            sandbox: SandboxConfig {
+                enabled: None,
+                backend: SandboxBackend::None,
+                firejail_args: vec![],
+            },
+            ..Default::default()
+        };
+        let sandbox = create_sandbox_impl(&config, false);
+        assert_eq!(sandbox.name(), "none");
+    }
+
+    #[test]
+    fn create_sandbox_impl_persistent_preference() {
+        let config = SecurityConfig {
+            sandbox: SandboxConfig {
+                enabled: None,
+                backend: SandboxBackend::Auto,
+                firejail_args: vec![],
+            },
+            ..Default::default()
+        };
+        let sandbox = create_sandbox_impl(&config, true);
+        assert!(sandbox.is_available());
+        // When persistent=true, Docker is preferred if available; otherwise any available backend
     }
 }

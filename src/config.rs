@@ -134,7 +134,7 @@ impl Default for SandboxConfig {
 }
 
 /// Sandbox backend selection.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxBackend {
     #[default]
@@ -309,5 +309,56 @@ mod tests {
         let a = AuditConfig::default();
         assert!(a.enabled);
         assert_eq!(a.log_path, "audit.log");
+    }
+
+    #[test]
+    fn security_config_default() {
+        let s = SecurityConfig::default();
+        assert_eq!(s.sandbox.backend, SandboxBackend::Auto);
+        assert!(s.audit.enabled);
+    }
+
+    #[test]
+    fn sandbox_config_default() {
+        let s = SandboxConfig::default();
+        assert!(s.enabled.is_none());
+        assert_eq!(s.backend, SandboxBackend::Auto);
+        assert!(s.firejail_args.is_empty());
+    }
+
+    #[test]
+    fn resource_limits_default() {
+        let r = ResourceLimitsConfig::default();
+        assert_eq!(r.max_memory_mb, 512);
+        assert_eq!(r.max_cpu_time_seconds, 60);
+        assert_eq!(r.max_subprocesses, 10);
+    }
+
+    #[test]
+    fn security_config_serde_roundtrip() {
+        let config = SecurityConfig {
+            sandbox: SandboxConfig {
+                enabled: Some(true),
+                backend: SandboxBackend::Firejail,
+                firejail_args: vec!["--private".into()],
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: SecurityConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.sandbox.enabled, Some(true));
+        assert_eq!(parsed.sandbox.firejail_args, vec!["--private"]);
+    }
+
+    #[test]
+    fn sandbox_config_serde_roundtrip() {
+        let config = SandboxConfig {
+            enabled: Some(false),
+            backend: SandboxBackend::Docker,
+            firejail_args: vec![],
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: SandboxConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.backend, SandboxBackend::Docker);
     }
 }

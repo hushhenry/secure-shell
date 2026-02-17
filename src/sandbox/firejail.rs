@@ -2,8 +2,6 @@
 //!
 //! Firejail is a SUID sandbox program that Linux applications use to sandbox themselves.
 
-#![cfg(target_os = "linux")]
-
 use std::process::Command;
 
 use crate::sandbox::Sandbox;
@@ -82,6 +80,7 @@ impl Sandbox for FirejailSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn firejail_sandbox_name() {
@@ -92,5 +91,29 @@ mod tests {
     fn firejail_description_mentions_dependency() {
         let desc = FirejailSandbox.description();
         assert!(desc.contains("firejail"));
+    }
+
+    #[test]
+    fn firejail_wrap_command_prepends_with_security_flags() {
+        if let Ok(sandbox) = FirejailSandbox::new() {
+            let mut cmd = Command::new("ls");
+            cmd.arg("-la");
+            sandbox.wrap_command(&mut cmd).unwrap();
+            assert_eq!(cmd.get_program().to_string_lossy(), "firejail");
+            let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().into()).collect();
+            assert!(args.contains(&"--private=home".to_string()));
+            assert!(args.contains(&"--private-dev".to_string()));
+            assert!(args.contains(&"--nosound".to_string()));
+            assert!(args.contains(&"--noprofile".to_string()));
+            assert!(args.contains(&"--quiet".to_string()));
+            assert!(args.contains(&"ls".to_string()));
+            assert!(args.contains(&"-la".to_string()));
+        }
+    }
+
+    #[test]
+    fn firejail_is_available_false_when_not_installed() {
+        let sandbox = FirejailSandbox;
+        assert_eq!(sandbox.is_available(), FirejailSandbox::is_installed());
     }
 }

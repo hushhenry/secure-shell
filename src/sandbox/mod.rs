@@ -1,23 +1,23 @@
 //! Pluggable sandbox backends for OS-level isolation.
 
+#[cfg(feature = "sandbox-bubblewrap")]
+mod bubblewrap;
 mod detect;
+mod docker;
 #[cfg(target_os = "linux")]
 mod firejail;
 #[cfg(feature = "sandbox-landlock")]
 mod landlock;
-#[cfg(feature = "sandbox-bubblewrap")]
-mod bubblewrap;
-mod docker;
 #[cfg(target_os = "macos")]
 mod seatbelt;
 
+#[cfg(feature = "sandbox-bubblewrap")]
+pub use bubblewrap::BubblewrapSandbox;
 pub use docker::DockerSandbox;
 #[cfg(target_os = "linux")]
 pub use firejail::FirejailSandbox;
 #[cfg(feature = "sandbox-landlock")]
 pub use landlock::LandlockSandbox;
-#[cfg(feature = "sandbox-bubblewrap")]
-pub use bubblewrap::BubblewrapSandbox;
 #[cfg(target_os = "macos")]
 pub use seatbelt::SeatbeltSandbox;
 
@@ -71,6 +71,7 @@ pub fn create_sandbox(config: &SecurityConfig, persistent: bool) -> Arc<dyn Sand
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{SandboxBackend, SandboxConfig, SecurityConfig};
 
     #[test]
     fn noop_sandbox_name() {
@@ -83,11 +84,48 @@ mod tests {
     }
 
     #[test]
-    fn noop_sandbox_wrap_command_is_noop() {
+    fn noop_sandbox_wrap_command_is_identity() {
         let mut cmd = Command::new("echo");
         cmd.arg("test");
         let sandbox = NoopSandbox;
         assert!(sandbox.wrap_command(&mut cmd).is_ok());
         assert_eq!(cmd.get_program().to_string_lossy(), "echo");
+        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().into()).collect();
+        assert_eq!(args, vec!["test"]);
+    }
+
+    #[test]
+    fn create_sandbox_backend_none_returns_noop() {
+        let config = SecurityConfig {
+            sandbox: SandboxConfig {
+                enabled: None,
+                backend: SandboxBackend::None,
+                firejail_args: vec![],
+            },
+            ..Default::default()
+        };
+        let sandbox = create_sandbox(&config, false);
+        assert_eq!(sandbox.name(), "none");
+    }
+
+    #[test]
+    fn create_sandbox_enabled_false_returns_noop() {
+        let config = SecurityConfig {
+            sandbox: SandboxConfig {
+                enabled: Some(false),
+                backend: SandboxBackend::Firejail,
+                firejail_args: vec![],
+            },
+            ..Default::default()
+        };
+        let sandbox = create_sandbox(&config, false);
+        assert_eq!(sandbox.name(), "none");
+    }
+
+    #[test]
+    fn create_sandbox_auto_returns_something_available() {
+        let config = SecurityConfig::default();
+        let sandbox = create_sandbox(&config, false);
+        assert!(sandbox.is_available());
     }
 }

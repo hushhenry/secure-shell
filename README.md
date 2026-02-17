@@ -48,6 +48,25 @@ sandbox.wrap_command(&mut cmd).unwrap();
 - `sandbox-landlock`: Enable Landlock LSM backend (Linux only).
 - `sandbox-bubblewrap`: Enable Bubblewrap backend.
 
+## Sandbox Backend Dependencies
+
+### Linux
+
+- **Landlock**: No installation needed. Requires Linux kernel 5.13+. Check with `uname -r`.
+- **Firejail**: `sudo apt install firejail` (Debian/Ubuntu), `sudo dnf install firejail` (Fedora), `sudo pacman -S firejail` (Arch)
+- **Bubblewrap**: `sudo apt install bubblewrap` (Debian/Ubuntu), `sudo dnf install bubblewrap` (Fedora), `sudo pacman -S bubblewrap` (Arch)
+- **Docker**: Follow [Docker Engine install guide](https://docs.docker.com/engine/install/)
+
+### macOS
+
+- **Seatbelt (sandbox-exec)**: Built into macOS, no installation needed. Available on macOS 10.5+.
+- **Docker**: Install [Docker Desktop](https://www.docker.com/products/docker-desktop/), [OrbStack](https://orbstack.dev/), or [Colima](https://github.com/abiosoft/colima) (`brew install colima docker`)
+
+### Feature flags
+
+- `sandbox-landlock`: Enable Landlock support (Linux only, requires `landlock` crate)
+- `sandbox-bubblewrap`: Enable Bubblewrap support
+
 ## License
 
 Apache-2.0. See LICENSE.

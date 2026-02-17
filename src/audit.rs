@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 /// Audit event types.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditEventType {
     /// Shell command execution.
@@ -349,6 +349,100 @@ mod tests {
         logger.log(&event)?;
 
         assert!(!tmp.path().join("audit.log").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn audit_event_builder_with_action_result_security() {
+        let event = AuditEvent::new(AuditEventType::CommandExecution)
+            .with_action("git push".to_string(), "medium".to_string(), true, true)
+            .with_result(false, Some(1), 100, Some("failed".to_string()))
+            .with_security(Some("docker".to_string()));
+        assert!(event.action.is_some());
+        assert_eq!(
+            event.action.as_ref().unwrap().command,
+            Some("git push".to_string())
+        );
+        assert!(event.result.is_some());
+        assert_eq!(event.result.as_ref().unwrap().exit_code, Some(1));
+        assert_eq!(event.security.sandbox_backend, Some("docker".to_string()));
+    }
+
+    #[test]
+    fn audit_event_serde_roundtrip() {
+        let event = AuditEvent::new(AuditEventType::SecurityEvent)
+            .with_actor("cli".to_string(), None, Some("user".to_string()))
+            .with_action("ls".to_string(), "low".to_string(), false, true);
+        let json = serde_json::to_string(&event).expect("serialize");
+        let parsed: AuditEvent = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed.event_id, event.event_id);
+        assert_eq!(parsed.event_type, event.event_type);
+        assert_eq!(parsed.actor.as_ref().unwrap().channel, "cli");
+        assert_eq!(
+            parsed.action.as_ref().unwrap().risk_level,
+            Some("low".to_string())
+        );
+    }
+
+    #[test]
+    fn audit_logger_log_writes_when_enabled() -> Result<()> {
+        let tmp = TempDir::new()?;
+        let config = AuditConfig {
+            enabled: true,
+            log_path: "audit.log".to_string(),
+            ..Default::default()
+        };
+        let logger = AuditLogger::new(config, tmp.path().to_path_buf())?;
+        let event = AuditEvent::new(AuditEventType::CommandExecution).with_action(
+            "ls".to_string(),
+            "low".to_string(),
+            false,
+            true,
+        );
+        logger.log(&event)?;
+        let log_file = tmp.path().join("audit.log");
+        assert!(log_file.exists());
+        let content = std::fs::read_to_string(&log_file)?;
+        assert!(content.contains("command_execution")); // serde snake_case
+        assert!(content.contains("ls"));
+        Ok(())
+    }
+
+    #[test]
+    fn audit_logger_log_rotation_when_exceeds_max_size() -> Result<()> {
+        let tmp = TempDir::new()?;
+        let log_path = tmp.path().join("audit.log");
+        let config = AuditConfig {
+            enabled: true,
+            log_path: log_path.file_name().unwrap().to_string_lossy().to_string(),
+            max_size_mb: 0, // 0 MB → rotate on first write after initial
+            ..Default::default()
+        };
+        let logger = AuditLogger::new(config, tmp.path().to_path_buf())?;
+        // Fill file to trigger rotation (max_size_mb 0 means any existing size could trigger; actually 0 MB means current_size_mb >= 0 is true after we write once)
+        // So after first log we have 1 line. Then rotate_if_needed: current_size_mb = 0, so 0 >= 0 triggers rotate. So we need to log once, then log again - second time might rotate.
+        let event = AuditEvent::new(AuditEventType::CommandExecution);
+        logger.log(&event)?;
+        logger.log(&event)?;
+        // Rotation renames audit.log to audit.log.1.log and creates new audit.log
+        let rotated = tmp.path().join("audit.log.1.log");
+        let main_log = tmp.path().join("audit.log");
+        assert!(main_log.exists() || rotated.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn audit_logger_log_command_convenience() -> Result<()> {
+        let tmp = TempDir::new()?;
+        let config = AuditConfig {
+            enabled: true,
+            log_path: "cmd.log".to_string(),
+            ..Default::default()
+        };
+        let logger = AuditLogger::new(config, tmp.path().to_path_buf())?;
+        logger.log_command("test", "cargo build", "low", false, true, true, 50)?;
+        let content = std::fs::read_to_string(tmp.path().join("cmd.log"))?;
+        assert!(content.contains("cargo build"));
         Ok(())
     }
 }

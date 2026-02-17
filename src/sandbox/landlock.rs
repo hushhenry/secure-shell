@@ -4,7 +4,11 @@
 //! Uses the pure-Rust `landlock` crate for filesystem access control.
 
 #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
-use landlock::{AccessFS, Ruleset};
+use landlock::{
+    Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
+};
+#[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
+use std::os::unix::process::CommandExt;
 #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
 use std::path::Path;
 
@@ -26,17 +30,14 @@ impl LandlockSandbox {
 
     /// Create a Landlock sandbox with a specific workspace directory.
     pub fn with_workspace(workspace_dir: Option<std::path::PathBuf>) -> std::io::Result<Self> {
-        let test_ruleset = Ruleset::new().set_access_fs(AccessFS::read_file | AccessFS::write_file);
-        match test_ruleset.create() {
-            Ok(_) => Ok(Self { workspace_dir }),
-            Err(e) => {
-                tracing::debug!("Landlock not available: {}", e);
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "Landlock not available",
-                ))
-            }
-        }
+        let abi = ABI::V1;
+        let access = AccessFs::from_read(abi) | AccessFs::from_write(abi);
+        let _ = Ruleset::default()
+            .handle_access(access)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Unsupported, e))?
+            .create()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Unsupported, e))?;
+        Ok(Self { workspace_dir })
     }
 
     /// Probe if Landlock is available (for auto-detection).
@@ -45,59 +46,66 @@ impl LandlockSandbox {
     }
 
     fn apply_restrictions(&self) -> std::io::Result<()> {
-        let mut ruleset = Ruleset::new().set_access_fs(
-            AccessFS::read_file
-                | AccessFS::write_file
-                | AccessFS::read_dir
-                | AccessFS::remove_dir
-                | AccessFS::remove_file
-                | AccessFS::make_char
-                | AccessFS::make_sock
-                | AccessFS::make_fifo
-                | AccessFS::make_block
-                | AccessFS::make_reg
-                | AccessFS::make_sym,
-        );
+        let abi = ABI::V1;
+        let access_all = AccessFs::from_all(abi);
+        let access_rw = AccessFs::from_read(abi) | AccessFs::from_write(abi);
+        let access_ro = AccessFs::from_read(abi);
+
+        let mut created = Ruleset::default()
+            .handle_access(access_all)
+            .map_err(std::io::Error::other)?
+            .create()
+            .map_err(std::io::Error::other)?;
 
         if let Some(ref workspace) = self.workspace_dir {
             if workspace.exists() {
-                ruleset = ruleset.add_path(
-                    workspace,
-                    AccessFS::read_file | AccessFS::write_file | AccessFS::read_dir,
-                )?;
+                let fd = PathFd::new(workspace.as_path()).map_err(std::io::Error::other)?;
+                created = created
+                    .add_rule(PathBeneath::new(fd, access_rw))
+                    .map_err(std::io::Error::other)?;
             }
         }
 
-        ruleset = ruleset.add_path(
-            Path::new("/tmp"),
-            AccessFS::read_file | AccessFS::write_file,
-        )?;
-        ruleset = ruleset.add_path(Path::new("/usr"), AccessFS::read_file | AccessFS::read_dir)?;
-        ruleset = ruleset.add_path(Path::new("/bin"), AccessFS::read_file | AccessFS::read_dir)?;
-
-        match ruleset.create() {
-            Ok(_) => {
-                tracing::debug!("Landlock restrictions applied successfully");
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!("Failed to apply Landlock restrictions: {}", e);
-                Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+        for (path, access) in [
+            (Path::new("/tmp"), access_rw),
+            (Path::new("/usr"), access_ro),
+            (Path::new("/bin"), access_ro),
+        ] {
+            if path.exists() {
+                let fd = PathFd::new(path).map_err(std::io::Error::other)?;
+                created = created
+                    .add_rule(PathBeneath::new(fd, access))
+                    .map_err(std::io::Error::other)?;
             }
         }
+
+        created.restrict_self().map_err(std::io::Error::other)?;
+        tracing::debug!("Landlock restrictions applied successfully");
+        Ok(())
     }
 }
 
 #[cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
 impl Sandbox for LandlockSandbox {
-    fn wrap_command(&self, _cmd: &mut std::process::Command) -> std::io::Result<()> {
-        self.apply_restrictions()
+    fn wrap_command(&self, cmd: &mut std::process::Command) -> std::io::Result<()> {
+        let workspace_dir = self.workspace_dir.clone();
+        unsafe {
+            cmd.pre_exec(move || {
+                let sandbox = LandlockSandbox {
+                    workspace_dir: workspace_dir.clone(),
+                };
+                sandbox.apply_restrictions()
+            });
+        }
+        Ok(())
     }
 
     fn is_available(&self) -> bool {
-        Ruleset::new()
-            .set_access_fs(AccessFS::read_file)
-            .create()
+        let abi = ABI::V1;
+        let access = AccessFs::from_read(abi);
+        Ruleset::default()
+            .handle_access(access)
+            .and_then(|r: Ruleset| r.create())
             .is_ok()
     }
 
@@ -186,5 +194,13 @@ mod tests {
             Ok(sandbox) => assert!(sandbox.is_available()),
             Err(_) => {}
         }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn landlock_non_linux_unavailable() {
+        let sandbox = LandlockSandbox::default();
+        assert!(!sandbox.is_available());
+        assert_eq!(sandbox.name(), "landlock");
     }
 }

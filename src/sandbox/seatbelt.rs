@@ -77,7 +77,7 @@ impl SeatbeltSandbox {
     }
 
     /// Generate a Scheme policy file content. Deny by default; allow process-fork/exec, file-read/write for allowed subpaths, /tmp, and optional network.
-    fn generate_sb_content(
+    pub(crate) fn generate_sb_content(
         &self,
         allowed_paths: &[AllowedPath],
         _forbidden_paths: &[String],
@@ -150,7 +150,10 @@ impl Sandbox for SeatbeltSandbox {
 
         let policy_path = self.write_policy_file(&allowed_paths, &forbidden_paths)?;
         let program = cmd.get_program().to_string_lossy().to_string();
-        let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
 
         let mut sandbox_cmd = Command::new("sandbox-exec");
         sandbox_cmd.arg("-f");
@@ -177,6 +180,7 @@ impl Sandbox for SeatbeltSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn seatbelt_sandbox_name() {
@@ -188,5 +192,46 @@ mod tests {
     #[test]
     fn seatbelt_probe() {
         let _ = SeatbeltSandbox::probe();
+    }
+
+    #[test]
+    fn seatbelt_policy_includes_deny_default() {
+        let sandbox = SeatbeltSandbox::default();
+        let allowed = vec![AllowedPath {
+            path: std::path::PathBuf::from("/tmp/ws"),
+            writable: true,
+        }];
+        let forbidden: Vec<String> = vec![];
+        let content = sandbox.generate_sb_content(&allowed, &forbidden);
+        assert!(content.contains("(deny default)"));
+    }
+
+    #[test]
+    fn seatbelt_policy_includes_allowed_read_and_write_paths() {
+        let sandbox = SeatbeltSandbox::default();
+        let allowed = vec![AllowedPath {
+            path: std::path::PathBuf::from("/tmp/workspace"),
+            writable: true,
+        }];
+        let forbidden: Vec<String> = vec![];
+        let content = sandbox.generate_sb_content(&allowed, &forbidden);
+        assert!(content.contains("file-read*"));
+        assert!(content.contains("file-write*"));
+        assert!(content.contains("/tmp/workspace"));
+    }
+
+    #[test]
+    fn seatbelt_wrap_command_rewrites_to_sandbox_exec() {
+        if let Ok(sandbox) = SeatbeltSandbox::new() {
+            let mut cmd = Command::new("echo");
+            cmd.arg("hi");
+            sandbox.wrap_command(&mut cmd).unwrap();
+            assert_eq!(cmd.get_program().to_string_lossy(), "sandbox-exec");
+            let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().into()).collect();
+            assert_eq!(args[0], "-f");
+            assert!(args[1].ends_with(".sb"));
+            assert_eq!(args[2], "echo");
+            assert_eq!(args[3], "hi");
+        }
     }
 }
