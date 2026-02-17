@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn firejail_is_available_false_when_not_installed() {
+    fn firejail_is_available_matches_is_installed() {
         let sandbox = FirejailSandbox;
         assert_eq!(sandbox.is_available(), FirejailSandbox::is_installed());
     }
