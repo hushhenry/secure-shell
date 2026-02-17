@@ -171,12 +171,13 @@ impl PersistentSandbox for DockerSandbox {
             .collect();
 
         // Start container if stopped
-        let start_out = Command::new("docker").arg("start").arg(session_id).output()?;
+        let start_out = Command::new("docker")
+            .arg("start")
+            .arg(session_id)
+            .output()?;
         if !start_out.status.success() {
             let err = String::from_utf8_lossy(&start_out.stderr);
-            return Err(std::io::Error::other(format!(
-                "docker start failed: {err}"
-            )));
+            return Err(std::io::Error::other(format!("docker start failed: {err}")));
         }
 
         let mut docker_cmd = Command::new("docker");
